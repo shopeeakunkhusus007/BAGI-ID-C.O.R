@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C.O.R ID Hub</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#0b1020;color:#eef2ff;min-height:100vh}
+header{padding:28px 18px;text-align:center;background:linear-gradient(135deg,#111a35,#202d5b)}
+h1{margin:0 0 8px}.sub{color:#aeb9d8}main{max-width:700px;margin:auto;padding:18px 14px 40px}
+.card{background:#121a30;border:1px solid #ffffff14;border-radius:18px;padding:18px;margin:14px 0;box-shadow:0 10px 30px #0003}
+.item{display:flex;gap:10px;align-items:center;background:#0b1326;border-radius:12px;padding:12px;margin:9px 0}
+.id{flex:1;font-weight:bold;word-break:break-all}button,input{font:inherit}button{border:0;border-radius:10px;padding:10px 13px;color:#fff;background:#33405f;font-weight:bold}button.primary{background:#4b5fe8}button.danger{background:#c9364e}
+input{width:100%;padding:12px;margin:5px 0;background:#091123;color:#fff;border:1px solid #30405f;border-radius:10px}
+.row{display:flex;gap:8px}.row input{margin:0}.row button{white-space:nowrap}
+.muted,.empty{color:#9da9c7}.ok{color:#70e1a2}.err{color:#ff8799;font-size:14px;margin-top:8px}
+footer{text-align:center;color:#657292;padding:20px}
+@media(max-width:520px){.row{flex-direction:column}.row button{width:100%}}
+</style>
+</head>
+<body>
+<header><h1>C.O.R ID HUB</h1><div class="sub">Daftar ID C.O.R — lihat dan salin</div></header>
+<main>
+<section class="card"><h2>ID Tersedia</h2><div id="list" class="muted">Memuat...</div></section>
+
+<section id="loginCard" class="card">
+<h2>Panel Pemilik</h2>
+<div class="muted">Login khusus pemilik website.</div>
+<input id="email" type="email" placeholder="Email admin">
+<input id="pass" type="password" placeholder="Password">
+<button id="login" class="primary">Masuk</button><div id="loginMsg"></div>
+</section>
+
+<section id="adminCard" class="card" hidden>
+<h2>Panel Admin</h2><div id="who" class="muted"></div>
+<div class="row" style="margin-top:12px"><input id="newid" placeholder="Masukkan ID C.O.R"><button id="add" class="primary">Tambah</button></div>
+<div id="adminList"></div>
+<button id="logout">Keluar</button>
+</section>
+</main>
+<footer>C.O.R ID Hub</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/*
+  ================================
+  ISI 2 DATA INI DARI SUPABASE
+  ================================
+*/
+const SUPABASE_URL="PASTE_SUPABASE_URL";
+const SUPABASE_KEY="PASTE_SUPABASE_ANON_OR_PUBLISHABLE_KEY";
+
+let sb=null;
+if(SUPABASE_URL.startsWith("http") && SUPABASE_KEY.length>20)
+  sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const $=x=>document.querySelector(x);
+const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+function error(e,t){$(e).innerHTML='<div class="err">'+esc(t)+'</div>'}
+
+async function load(){
+ const box=$("#list");
+ if(!sb){box.innerHTML='<div class="err">Database belum dikonfigurasi. Isi URL dan key di bagian atas file index.html.</div>';return}
+ const {data,error:e}=await sb.from("cor_ids").select("id,cor_id").eq("status","active").order("id",{ascending:false});
+ if(e){box.innerHTML='<div class="err">Gagal memuat ID.</div>';return}
+ box.innerHTML=data.length?data.map(x=>'<div class="item"><span class="id">'+esc(x.cor_id)+'</span><button data-copy="'+encodeURIComponent(x.cor_id)+'">Salin</button></div>').join(""):'<div class="empty">Belum ada ID.</div>';
+ document.querySelectorAll("[data-copy]").forEach(b=>b.onclick=async()=>{await navigator.clipboard.writeText(decodeURIComponent(b.dataset.copy));let x=b.textContent;b.textContent="Tersalin ✓";setTimeout(()=>b.textContent=x,1200)});
+}
+
+async function admin(){
+ if(!sb)return;
+ const {data:{user}}=await sb.auth.getUser();
+ if(!user){$("#adminCard").hidden=true;$("#loginCard").hidden=false;return}
+ $("#loginCard").hidden=true;$("#adminCard").hidden=false;$("#who").textContent=user.email||"Admin";
+ const {data,error:e}=await sb.from("cor_ids").select("id,cor_id,status").order("id",{ascending:false});
+ if(e){$("#adminList").innerHTML='<div class="err">Gagal memuat panel admin.</div>';return}
+ $("#adminList").innerHTML=data.length?data.map(x=>'<div class="item"><span class="id">'+esc(x.cor_id)+'</span><button class="danger" data-del="'+x.id+'">Hapus</button></div>').join(""):'<div class="empty">Belum ada ID.</div>';
+ document.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(!confirm("Hapus ID ini?"))return;const {error}=await sb.from("cor_ids").update({status:"deleted"}).eq("id",b.dataset.del);if(error)alert("Gagal menghapus.");else{load();admin()}});
+}
+
+$("#login").onclick=async()=>{
+ if(!sb){error("#loginMsg","Isi konfigurasi Supabase di index.html terlebih dahulu.");return}
+ const {error:e}=await sb.auth.signInWithPassword({email:$("#email").value.trim(),password:$("#pass").value});
+ if(e)error("#loginMsg","Email atau password salah.");else admin();
+};
+$("#logout").onclick=async()=>{await sb.auth.signOut();admin()};
+$("#add").onclick=async()=>{
+ const v=$("#newid").value.trim();if(!v)return;
+ const {error:e}=await sb.from("cor_ids").insert({cor_id:v,status:"active"});
+ if(e)alert("Gagal menambahkan ID.");else{$("#newid").value="";load();admin()}
+};
+load();admin();
+</script>
+</body>
+</html>
